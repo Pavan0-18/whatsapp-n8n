@@ -1,0 +1,138 @@
+{
+  "name": "WhatsApp-Drive Assistant (MVP)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp",
+        "responseMode": "lastNode"
+      },
+      "id": "Webhook_WhatsApp",
+      "name": "Webhook (Twilio)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 3,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "const raw = $json.body || $json;\nconst text = (raw.Body || '').trim();\nconst from = raw.From || raw.WaId || 'unknown';\nfunction parseCommand(t){const s=t.replace(/\\s+/g,' ').trim();const u=s.toUpperCase();if(!s)return{action:'HELP'};if(u.startsWith('LIST ')){const m=s.match(/^LIST\\s+\\/(.+)$/i);return{action:'LIST',folder:m?m[1].trim():null}}if(u.startsWith('DELETE ')){const parts=s.split(' ');const confirm=parts[parts.length-1].toUpperCase()==='CONFIRM';const path=confirm?parts.slice(1,-1).join(' '):parts.slice(1).join(' ');const m=path.match(/^\\/(.+?)\\/(.+)$/);return{action:'DELETE',folder:m?m[1]:null,filename:m?m[2]:null,confirm}}if(u.startsWith('MOVE ')){const m=s.match(/^MOVE\\s+\\/(.+?)\\/(.+)\\s+\\/(.+)$/i);return{action:'MOVE',srcFolder:m?m[1]:null,filename:m?m[2]:null,destFolder:m?m[3]:null}}if(u.startsWith('SUMMARY ')){const m=s.match(/^SUMMARY\\s+\\/(.+)$/i);return{action:'SUMMARY',folder:m?m[1].trim():null}}if(u==='HELP')return{action:'HELP'};return{action:'UNKNOWN',raw:s}}\nconst parsed=parseCommand(text);\nreturn [{ body: raw, text, from, ...parsed }];"
+      },
+      "id": "Fn_Parse",
+      "name": "Parse Command",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 2,
+      "position": [560, 300]
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{$json.action}}",
+        "rules": {
+          "values": [
+            {"operation": "equal", "value2": "LIST"},
+            {"operation": "equal", "value2": "DELETE"},
+            {"operation": "equal", "value2": "MOVE"},
+            {"operation": "equal", "value2": "SUMMARY"},
+            {"operation": "equal", "value2": "HELP"}
+          ]
+        }
+      },
+      "id": "Switch_Action",
+      "name": "Route by Action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 2,
+      "position": [810, 300]
+    },
+
+    {"parameters": {"operation": "list", "filters": {"q": "={{'name = \"' + $node['Parse Command'].json.folder + '\" and mimeType = \"application/vnd.google-apps.folder\" and trashed = false'}}"}},
+     "id": "GDrive_FindFolder_LIST","name": "Drive: Find Folder (LIST)","type": "n8n-nodes-base.googleDrive","typeVersion": 3,"position": [1060, 120]},
+    {"parameters": {"operation": "list", "filters": {"q": "={{'\'' + $json.id + '\' in parents and trashed = false'}}"}},
+     "id": "GDrive_ListFiles","name": "Drive: List Files","type": "n8n-nodes-base.googleDrive","typeVersion": 3,"position": [1290, 120]},
+    {"parameters": {"functionCode": "const items=$items('Drive: List Files',0,0);const folder=$node['Parse Command'].json.folder;const from=$node['Parse Command'].json.from;const action='LIST';const args=$node['Parse Command'].json.text;const timestamp=new Date().toISOString();if(!items.length){return[{twiml:`<Response><Message>No files in /${folder}</Message></Response>`,status:'ok',timestamp,from,action,args}]};const names=items.map(i=>i.json.name).slice(0,50);const msg=`Files in /${folder}:\n`+names.join('\n');return[{twiml:`<Response><Message>${msg}</Message></Response>`,status:'ok',timestamp,from,action,args}]"},
+     "id": "Fn_List_To_TwiML","name": "List -> TwiML","type": "n8n-nodes-base.function","typeVersion": 2,"position": [1510, 120]},
+
+    {"parameters": {"functionCode": "if(!$json.confirm){const folder=$json.folder;const filename=$json.filename;const from=$node['Parse Command'].json.from;const action='DELETE';const args=$node['Parse Command'].json.text;const timestamp=new Date().toISOString();return[{twiml:`<Response><Message>To delete, resend with CONFIRM: DELETE /${folder}/${filename} CONFIRM</Message></Response>`,status:'needs_confirm',timestamp,from,action,args}]};return items;"},
+     "id": "Fn_RequireConfirm","name": "Require CONFIRM","type": "n8n-nodes-base.function","typeVersion": 2,"position": [1060, 280]},
+    {"parameters": {"dataType": "boolean", "value1": "={{$json.twiml !== undefined}}", "rules": {"values": [{"operation": "equal", "value2": true}]}},
+     "id": "Switch_Confirm","name": "Has TwiML?","type": "n8n-nodes-base.switch","typeVersion": 2,"position": [1170, 280]},
+    {"parameters": {"operation": "list", "filters": {"q": "={{'name = \"' + $node['Parse Command'].json.folder + '\" and mimeType = \"application/vnd.google-apps.folder\" and trashed = false'}}"}},
+     "id": "GDrive_FindFolder_DELETE","name": "Drive: Find Folder (DEL)","type": "n8n-nodes-base.googleDrive","typeVersion": 3,"position": [1290, 280]},
+    {"parameters": {"operation": "list", "filters": {"q": "={{'name = \"' + $node['Parse Command'].json.filename + '\" and \' + $json.id + '\' in parents and trashed = false'}}"}},
+     "id": "GDrive_FindFile_DELETE","name": "Drive: Find File (DEL)","type": "n8n-nodes-base.googleDrive","typeVersion": 3,"position": [1510, 280]},
+    {"parameters": {"operation": "delete", "fileId": "={{$json.id}}", "options": {"useTrash": true}},
+     "id": "GDrive_Delete","name": "Drive: Delete","type": "n8n-nodes-base.googleDrive","typeVersion": 3,"position": [1730, 280]},
+    {"parameters": {"functionCode": "const ok=$json&&$json.success!==false;const filename=$node['Parse Command'].json.filename;const folder=$node['Parse Command'].json.folder;const from=$node['Parse Command'].json.from;const action='DELETE';const args=$node['Parse Command'].json.text;const timestamp=new Date().toISOString();const msg=ok?`Deleted ${filename} from /${folder}`:`Could not delete ${filename}`;return[{twiml:`<Response><Message>${msg}</Message></Response>`,status:ok?'ok':'error',timestamp,from,action,args}]"},
+     "id": "Fn_Delete_To_TwiML","name": "Delete -> TwiML","type": "n8n-nodes-base.function","typeVersion": 2,"position": [1950, 280]},
+
+    {"parameters": {"operation": "list", "filters": {"q": "={{'name = \"' + $node['Parse Command'].json.srcFolder + '\" and mimeType = \"application/vnd.google-apps.folder\" and trashed = false'}}"}},
+     "id": "GDrive_FindSrcFolder_MOVE","name": "Drive: Find Src Folder (MOVE)","type": "n8n-nodes-base.googleDrive","typeVersion": 3,"position": [1060, 430]},
+    {"parameters": {"operation": "list", "filters": {"q": "={{'name = \"' + $node['Parse Command'].json.filename + '\" and \' + $json.id + '\' in parents and trashed = false'}}"}},
+     "id": "GDrive_FindFile_MOVE","name": "Drive: Find File (MOVE)","type": "n8n-nodes-base.googleDrive","typeVersion": 3,"position": [1290, 430]},
+    {"parameters": {"operation": "list", "filters": {"q": "={{'name = \"' + $node['Parse Command'].json.destFolder + '\" and mimeType = \"application/vnd.google-apps.folder\" and trashed = false'}}"}},
+     "id": "GDrive_FindDestFolder_MOVE","name": "Drive: Find Dest Folder (MOVE)","type": "n8n-nodes-base.googleDrive","typeVersion": 3,"position": [1510, 430]},
+    {"parameters": {"operation": "move", "fileId": "={{$node['Drive: Find File (MOVE)'].json.id}}", "folderId": "={{$json.id}}"},
+     "id": "GDrive_Move","name": "Drive: Move","type": "n8n-nodes-base.googleDrive","typeVersion": 3,"position": [1730, 430]},
+    {"parameters": {"functionCode": "const filename=$node['Parse Command'].json.filename;const dest=$node['Parse Command'].json.destFolder;const from=$node['Parse Command'].json.from;const action='MOVE';const args=$node['Parse Command'].json.text;const timestamp=new Date().toISOString();const msg=`Moved ${filename} to /${dest}`;return[{twiml:`<Response><Message>${msg}</Message></Response>`,status:'ok',timestamp,from,action,args}]"},
+     "id": "Fn_Move_To_TwiML","name": "Move -> TwiML","type": "n8n-nodes-base.function","typeVersion": 2,"position": [1950, 430]},
+
+    {"parameters": {"operation": "list", "filters": {"q": "={{'name = \"' + $node['Parse Command'].json.folder + '\" and mimeType = \"application/vnd.google-apps.folder\" and trashed = false'}}"}},
+     "id": "GDrive_FindFolder_SUMMARY","name": "Drive: Find Folder (SUM)","type": "n8n-nodes-base.googleDrive","typeVersion": 3,"position": [1060, 580]},
+    {"parameters": {"operation": "list", "filters": {"q": "={{'\'' + $json.id + '\' in parents and trashed = false'}}", "pageSize": 10}},
+     "id": "GDrive_List_SUMMARY","name": "Drive: List (SUM)","type": "n8n-nodes-base.googleDrive","typeVersion": 3,"position": [1290, 580]},
+    {"parameters": {"functionCode": "const files=$items('Drive: List (SUM)',0,0).map(i=>i.json);const supported=files.filter(f=>f.mimeType==='text/plain'||f.mimeType==='application/vnd.google-apps.document').slice(0,5);return supported.map(f=>({json:{fileId:f.id,name:f.name,mimeType:f.mimeType}}));"},
+     "id": "Fn_Filter_Supported","name": "Filter Supported Files","type": "n8n-nodes-base.function","typeVersion": 2,"position": [1510, 580]},
+    {"parameters": {"operation": "download", "fileId": "={{$json.fileId}}"},
+     "id": "GDrive_Download_Text","name": "Drive: Download (txt)","type": "n8n-nodes-base.googleDrive","typeVersion": 3,"position": [1730, 540]},
+    {"parameters": {"operation": "export", "fileId": "={{$json.fileId}}", "mimeType": "text/plain"},
+     "id": "GDrive_Export_GDoc","name": "Drive: Export (gdoc -> txt)","type": "n8n-nodes-base.googleDrive","typeVersion": 3,"position": [1730, 620]},
+    {"parameters": {"functionCode": "const results=[];for(const item of items){let text='';if(item.binary&&item.binary.data){text=Buffer.from(item.binary.data,'base64').toString('utf8')}results.push({json:{name:item.json.name||$json.name,text}})}return results;"},
+     "id": "Fn_Binary_To_Text","name": "Binary -> Text","type": "n8n-nodes-base.function","typeVersion": 2,"position": [1950, 580]},
+    {"parameters": {"resource": "chat", "operation": "create", "model": "gpt-4o-mini", "messages": [{"text": "You are a concise assistant. Summarize each document in 1-2 bullet points. Include the filename as a header. Be brief and specific.", "type": "system"}, {"text": "={{$json.name + '\n\n' + $json.text.substring(0, 6000)}}", "type": "user"}]},
+     "id": "OpenAI_Summarize","name": "OpenAI: Summarize","type": "n8n-nodes-base.openAi","typeVersion": 4,"position": [2170, 580]},
+    {"parameters": {"functionCode": "const parts=items.map(i=>i.json.choices?.[0]?.message?.content||i.json.text||'').filter(Boolean);const text=parts.join('\n\n');const from=$node['Parse Command'].json.from;const action='SUMMARY';const args=$node['Parse Command'].json.text;const timestamp=new Date().toISOString();return[{twiml:`<Response><Message>${text.slice(0,1500)}</Message></Response>`,status:'ok',timestamp,from,action,args}]"},
+     "id": "Fn_Summary_To_TwiML","name": "Summary -> TwiML","type": "n8n-nodes-base.function","typeVersion": 2,"position": [2390, 580]},
+
+    {"parameters": {"functionCode": "const help='Commands:\nLIST /Folder\nDELETE /Folder/File CONFIRM\nMOVE /Src/File /Dest\nSUMMARY /Folder';const from=$node['Parse Command'].json.from;const action='HELP';const args=$node['Parse Command'].json.text;const timestamp=new Date().toISOString();return[{twiml:`<Response><Message>${help}</Message></Response>`,status:'help',timestamp,from,action,args}]"},
+     "id": "Fn_Help","name": "Help -> TwiML","type": "n8n-nodes-base.function","typeVersion": 2,"position": [1060, 740]},
+
+    {"parameters": {"operation": "append", "sheetId": "REPLACE_WITH_SHEET_ID", "range": "Sheet1!A:E", "options": {"valueInputMode": "RAW"}, "keyRow": 1, "columns": ["timestamp","from","action","args","status"]},
+     "id": "Sheets_Append","name": "Log to Google Sheets","type": "n8n-nodes-base.googleSheets","typeVersion": 5,"position": [2600, 360]},
+    {"parameters": {"options": {}, "responseData": "={{$json.twiml}}", "responseCode": 200, "responseHeaders": {"entries": [{"name": "Content-Type", "value": "application/xml"}]}},
+     "id": "Respond_Twilio","name": "Respond (Twilio XML)","type": "n8n-nodes-base.respondToWebhook","typeVersion": 1,"position": [2840, 360]}
+  ],
+  "connections": {
+    "Webhook (Twilio)": {"main": [[{"node": "Parse Command", "type": "main", "index": 0}]]},
+    "Parse Command": {"main": [[{"node": "Route by Action", "type": "main", "index": 0}]]},
+    "Route by Action": {"main": [[{"node": "Drive: Find Folder (LIST)", "type": "main", "index": 0}], [{"node": "Require CONFIRM", "type": "main", "index": 0}], [{"node": "Drive: Find Src Folder (MOVE)", "type": "main", "index": 0}], [{"node": "Drive: Find Folder (SUM)", "type": "main", "index": 0}], [{"node": "Help -> TwiML", "type": "main", "index": 0}]]},
+    "Drive: Find Folder (LIST)": {"main": [[{"node": "Drive: List Files", "type": "main", "index": 0}]]},
+    "Drive: List Files": {"main": [[{"node": "List -> TwiML", "type": "main", "index": 0}]]},
+    "Require CONFIRM": {"main": [[{"node": "Has TwiML?", "type": "main", "index": 0}]]},
+    "Has TwiML?": {"main": [[{"node": "Log to Google Sheets", "type": "main", "index": 0}], [{"node": "Drive: Find Folder (DEL)", "type": "main", "index": 0}]]},
+    "Drive: Find Folder (DEL)": {"main": [[{"node": "Drive: Find File (DEL)", "type": "main", "index": 0}]]},
+    "Drive: Find File (DEL)": {"main": [[{"node": "Drive: Delete", "type": "main", "index": 0}]]},
+    "Drive: Delete": {"main": [[{"node": "Delete -> TwiML", "type": "main", "index": 0}]]},
+    "Delete -> TwiML": {"main": [[{"node": "Log to Google Sheets", "type": "main", "index": 0}]]},
+    "Drive: Find Src Folder (MOVE)": {"main": [[{"node": "Drive: Find File (MOVE)", "type": "main", "index": 0}]]},
+    "Drive: Find File (MOVE)": {"main": [[{"node": "Drive: Find Dest Folder (MOVE)", "type": "main", "index": 0}]]},
+    "Drive: Find Dest Folder (MOVE)": {"main": [[{"node": "Drive: Move", "type": "main", "index": 0}]]},
+    "Drive: Move": {"main": [[{"node": "Move -> TwiML", "type": "main", "index": 0}]]},
+    "Move -> TwiML": {"main": [[{"node": "Log to Google Sheets", "type": "main", "index": 0}]]},
+    "Drive: Find Folder (SUM)": {"main": [[{"node": "Drive: List (SUM)", "type": "main", "index": 0}]]},
+    "Drive: List (SUM)": {"main": [[{"node": "Filter Supported Files", "type": "main", "index": 0}]]},
+    "Filter Supported Files": {"main": [[{"node": "Drive: Download (txt)", "type": "main", "index": 0}, {"node": "Drive: Export (gdoc -> txt)", "type": "main", "index": 0}]]},
+    "Drive: Download (txt)": {"main": [[{"node": "Binary -> Text", "type": "main", "index": 0}]]},
+    "Drive: Export (gdoc -> txt)": {"main": [[{"node": "Binary -> Text", "type": "main", "index": 0}]]},
+    "Binary -> Text": {"main": [[{"node": "OpenAI: Summarize", "type": "main", "index": 0}]]},
+    "OpenAI: Summarize": {"main": [[{"node": "Summary -> TwiML", "type": "main", "index": 0}]]},
+    "Summary -> TwiML": {"main": [[{"node": "Log to Google Sheets", "type": "main", "index": 0}]]},
+    "List -> TwiML": {"main": [[{"node": "Log to Google Sheets", "type": "main", "index": 0}]]},
+    "Help -> TwiML": {"main": [[{"node": "Log to Google Sheets", "type": "main", "index": 0}]]},
+    "Log to Google Sheets": {"main": [[{"node": "Respond (Twilio XML)", "type": "main", "index": 0}]]}
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {"executionOrder": "v1"},
+  "staticData": null
+}
+
+

@@ -1,0 +1,27 @@
+version: "3.9"
+services:
+  n8n:
+    image: ghcr.io/n8n-io/n8n:latest
+    container_name: n8n-whatsapp-drive
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_TUNNEL_SUBDOMAIN=${N8N_TUNNEL_SUBDOMAIN}
+      - N8N_BASIC_AUTH_ACTIVE=${N8N_BASIC_AUTH_ACTIVE}
+      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
+      - GENERIC_TIMEZONE=${GENERIC_TIMEZONE}
+      - N8N_HOST=${N8N_HOST}
+      - N8N_PORT=${N8N_PORT}
+      - N8N_PROTOCOL=${N8N_PROTOCOL}
+      - EXECUTIONS_MODE=${EXECUTIONS_MODE}
+      - QUEUE_BULL_REDIS_ENABLE=${QUEUE_BULL_REDIS_ENABLE}
+      - WEBHOOK_URL_SUFFIX=${WEBHOOK_URL_SUFFIX}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - DATA_FOLDER=${DATA_FOLDER}
+    volumes:
+      - ./data:${DATA_FOLDER}
+
